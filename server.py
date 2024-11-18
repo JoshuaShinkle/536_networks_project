@@ -35,7 +35,7 @@ def handle_client(client_socket):
                 # If no data is received, the client has closed the connection
                 break
             
-            print("Received data: " + data.decode('utf-8'))
+            # print("Received data: " + data.decode('utf-8'))
     
     except Exception as e:
         print("Error handling client: " + str(e))

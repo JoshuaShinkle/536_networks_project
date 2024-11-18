@@ -2,8 +2,11 @@ import socket
 import time
 import argparse
 import multiprocessing
+import sys
 
 def create_connection(host, port):
+    time.sleep(2)
+
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.connect((host, port))
@@ -20,8 +23,9 @@ def create_connection(host, port):
         return None
 
     finally:
+        print("Done sending, closing socket")
         sock.close()
-        print("Closed socket")
+        sys.exit()
 
 def main():
     parser = argparse.ArgumentParser(description='Run experiment client')
@@ -43,6 +47,8 @@ def main():
 
     for p in processes:
         p.join()
+
+    sys.exit()
 
 
 if __name__ == '__main__':
