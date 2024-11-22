@@ -56,7 +56,7 @@ class SimpleSwitch(app_manager.RyuApp):
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def _packet_in_handler(self, ev):
-        print("handled packet")
+        # print("handled packet")
         msg = ev.msg
         datapath = msg.datapath
         ofproto = datapath.ofproto
