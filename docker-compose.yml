@@ -1,0 +1,38 @@
+version: '3.9'
+
+services:
+  ryu:
+    image: osrg/ryu
+    container_name: ryu_controller
+    # command: command to run controller here after we have it setup
+    volumes:
+      - ./ryu_app:/ryu_app
+    ports:
+      - "6633:6633"  # OpenFlow default port
+      - "8080:8080"  # Ryu REST API (if needed)
+    networks:
+      - mn_network
+    tty: true # keep container open
+
+  mininet:
+    image: iwaseyusuke/mininet
+    container_name: mininet
+
+    privileged: true
+
+    volumes:
+      - ./mn_scripts:/mn_scripts
+      # - /tmp/.X11-unix:/tmp/.X11-unix
+      # - /lib/modules:/lib/modules
+
+    # command: command here to run mininet once we have it setup
+    networks:
+      - mn_network
+    depends_on:
+      - ryu
+    tty: true # keep container open
+
+networks:
+  mn_network:
+    driver: bridge
+
