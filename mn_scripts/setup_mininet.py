@@ -78,18 +78,18 @@ if __name__ == '__main__':
 
     link = net.linksBetween(h1, s1)[0]
 
-    print("*** Running bandwidth test before changing link speed")
-    h1.cmd('iperf -s &')  # Start iperf server on h1
-    sleep(1)  # Allow server to start
-    print(h2.cmd('iperf -c 10.0.0.1 -t 5'))  # Run iperf client on h2
+    # print("*** Running bandwidth test before changing link speed")
+    # h1.cmd('iperf -s &')  # Start iperf server on h1
+    # sleep(1)  # Allow server to start
+    # print(h2.cmd('iperf -c 10.0.0.1 -t 5'))  # Run iperf client on h2
 
-    print("*** Changing bandwidth dynamically to 2 Mbps")
-    link.intf1.config(bw=2)
-    link.intf2.config(bw=2)
-    sleep(1)
+    # print("*** Changing bandwidth dynamically to 2 Mbps")
+    # link.intf1.config(bw=2)
+    # link.intf2.config(bw=2)
+    # sleep(1)
 
-    print("*** Running bandwidth test after changing link speed")
-    print(h2.cmd('iperf -c 10.0.0.1 -t 5'))  # Run iperf client again on h2
+    # print("*** Running bandwidth test after changing link speed")
+    # print(h2.cmd('iperf -c 10.0.0.1 -t 5'))  # Run iperf client again on h2
 
     # Test connectivity
     # info('*** Testing network connectivity\n')

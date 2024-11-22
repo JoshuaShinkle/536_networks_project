@@ -2,7 +2,10 @@ version: '3.9'
 
 services:
   ryu:
-    image: osrg/ryu
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: custom/ryu-controller:latest
     container_name: ryu_controller
     # command: command to run controller here after we have it setup
     volumes:
