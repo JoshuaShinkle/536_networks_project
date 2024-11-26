@@ -5,11 +5,17 @@ help:
 environment:
 	docker compose up --build -d
 
-mininet_bash:
-	docker exec -it mininet bash
+mininet_renet:
+	docker exec -it mininet bash -c "python3 setup_mininet_experiement.py"
 
-ryu_bash:
-	docker exec -it ryu_controller bash
+ryu_simple:
+	docker exec -it ryu_controller bash -c "ryu-manager ryu.app.simple_switch"
+
+ryu_switch:
+	docker exec -it ryu_controller bash -c "ryu-manager ryu.app.switch"
+
+restart:
+	docker restart mininet
 
 clean:
 	# Stop and remove all running containers
