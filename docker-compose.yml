@@ -20,15 +20,11 @@ services:
   mininet:
     image: iwaseyusuke/mininet
     container_name: mininet
-
     privileged: true
-
     volumes:
       - ./mn_scripts:/mn_scripts
-      # - /tmp/.X11-unix:/tmp/.X11-unix
-      # - /lib/modules:/lib/modules
-
-    # command: command here to run mininet once we have it setup
+    # Set the working directory as the mininet scripts
+    working_dir: /mn_scripts
     networks:
       - mn_network
     depends_on:
