@@ -174,7 +174,6 @@ def main():
         adjustment_thread.join(timeout=5)
         # Allow the background thread to continue running even after stopping the network
         info('*** Extra threads stopped\n')
-        os.system('sudo mn -c')
         
 
 if __name__ == '__main__':
