@@ -54,6 +54,6 @@ or just `docker exec ryu_controller ryu-manager /ryu_app/renet.py`
 
 ## Running mininet
 
-For mininet it is ran with python, so do `python3 /mn_scripts/paper_topology.py` from within the mininet container.
+For mininet it is ran with python, so do `python3 /mn_scripts/setup_mininet_experiment.py` from within the mininet container.
 
 For now, we have the containers running on the host network, so the IP for the ryu_controller is 127.0.0.1 which you will have to specify in the python code when connecting the controller.
