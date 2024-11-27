@@ -11,8 +11,8 @@ mininet_renet:
 ryu_simple:
 	docker exec -it ryu_controller bash -c "ryu-manager ryu.app.simple_switch"
 
-ryu_switch:
-	docker exec -it ryu_controller bash -c "ryu-manager ryu.app.switch"
+ryu_renet:
+	docker exec -it ryu_controller bash -c "ryu-manager ryu.app.renet_controller"
 
 restart:
 	docker restart mininet

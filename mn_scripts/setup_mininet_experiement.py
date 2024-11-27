@@ -25,9 +25,6 @@ PING_TEST_LENGTH = 18 # seconds
 RYU_IP = "ryu_controller"  # Docker container name or actual IP
 RYU_PORT = 6633
 
-lock = threading.Lock()
-stop_flag = threading.Event()
-
 class RenetTopo(Topo):
     def build(self):
         # Hosts
@@ -57,58 +54,53 @@ class RenetTopo(Topo):
         self.addLink(switch3, switch4, bw=ETH_BANDWIDTH)
 
 def change_link_bandwidth(net, node1, node2, new_bw):
-    with lock:
-        try:
-            link = net.linksBetween(net[node1], net[node2])[0]  # Get the link object
-            info(f"*** Changing bandwidth between {node1} and {node2} to {new_bw} Mbps\n")
-            
-            # Link Bandwidth changes both interfaces 
-            link.intf1.config(bw=new_bw)
-            link.intf2.config(bw=new_bw)
-            info(f"*** Bandwidth between {node1} and {node2} updated successfully\n")
+    try:
+        link = net.linksBetween(net[node1], net[node2])[0]  # Get the link object
+        info(f"*** Changing bandwidth between {node1} and {node2} to {new_bw} Mbps\n")
+        
+        # Link Bandwidth changes both interfaces 
+        link.intf1.config(bw=new_bw)
+        link.intf2.config(bw=new_bw)
+        info(f"*** Bandwidth between {node1} and {node2} updated successfully\n")
 
-        # Index error that results from some miscall of the mininet node networks (no link usually)
-        except IndexError:
-            info(f"*** Error: No link found between {node1} and {node2}\n")
+    # Index error that results from some miscall of the mininet node networks (no link usually)
+    except IndexError:
+        info(f"*** Error: No link found between {node1} and {node2}\n")
 
-def simulate_real_links(net, links, min_bw=SAT_BANDWIDTH, max_bw=ETH_BANDWIDTH, interval=LINK_CHANGE_INTERVAL):
-    while not stop_flag.is_set():
-        with lock:
-            link = random.choice(links)
-            new_bw = random.randint(min_bw, max_bw)
-            change_link_bandwidth(net, link[0], link[1], new_bw)
-            sleep(interval)
+def simulate_real_links(net, links, min_bw=SAT_BANDWIDTH, max_bw=ETH_BANDWIDTH):
+    link = random.choice(links)
+    new_bw = random.randint(min_bw, max_bw)
+    change_link_bandwidth(net, link[0], link[1], new_bw)
+    sleep(LINK_CHANGE_INTERVAL)
 
-def random_ping_test(net, duration):
-    start_time = time.time()  # Record the start time
-    while time.time() - start_time < duration:  # Run until timeout
-        # Get a list of all hosts in the network
-        hosts = net.hosts
+def random_ping_test(net):
+    # Get a list of all hosts in the network
+    hosts = net.hosts
 
-        # Randomly choose two distinct hosts
-        host1, host2 = random.sample(hosts, 2)
+    # Randomly choose two distinct hosts
+    host1, host2 = random.sample(hosts, 2)
 
-        # Ensure the hosts are properly initialized and have IPs
-        print(f"*** Checking IPs of {host1.name} and {host2.name}")
-        print(f"{host1.name} IP: {host1.IP()}")
-        print(f"{host2.name} IP: {host2.IP()}")
+    # Ensure the hosts are properly initialized and have IPs
+    print(f"*** Checking IPs of {host1.name} and {host2.name}")
+    print(f"{host1.name} IP: {host1.IP()}")
+    print(f"{host2.name} IP: {host2.IP()}")
 
-        # Make sure the host interfaces are up (some Mininet configurations might cause them to be down)
-        host1.cmd('ifconfig', host1.name + '-eth0', 'up')
-        host2.cmd('ifconfig', host2.name + '-eth0', 'up')
+    # Make sure the host interfaces are up (some Mininet configurations might cause them to be down)
+    host1.cmd('ifconfig', host1.name + '-eth0', 'up')
+    host2.cmd('ifconfig', host2.name + '-eth0', 'up')
 
-        # Randomly select the number of pings to send (e.g., between 1 and 10)
-        ping_count = random.randint(1, 10)
-        print(f"*** Pinging from {host1.name} to {host2.name} with {ping_count} pings")
+    # Randomly select the number of pings to send (e.g., between 1 and 10)
+    ping_count = random.randint(1, 10)
+    print(f"*** Pinging from {host1.name} to {host2.name} with {ping_count} pings")
 
-        # Run the ping command with the random ping count
-        result = host1.cmd(f'ping -c {ping_count} {host2.IP()}')
+    # Run the ping command with the random ping count
+    result = host1.cmd(f'ping -c {ping_count} {host2.IP()}')
 
-        # Print the result of the ping command
-        print(result)
+    # Print the result of the ping command
+    print(result)
 
-        # Optionally, add a sleep to pause between pings
-        sleep(PING_INTERVAL) 
+    # Optionally, add a sleep to pause between pings
+    sleep(PING_INTERVAL) 
 
 def main():
     try:
@@ -119,7 +111,7 @@ def main():
         #topo = RenetTopo()
 
         # Initialize Mininet
-        net = Mininet(topo=RenetTopo(), controller=None, switch=OVSSwitch, link=TCLink)
+        net = Mininet(topo=RenetTopo(), controller=RemoteController, switch=OVSSwitch, link=TCLink)
 
         # Add the Ryu controller
         info('*** Adding Ryu controller\n')
@@ -146,9 +138,9 @@ def main():
         #simulate_real_links(net,links,SAT_BANDWIDTH,ETH_BANDWIDTH,LINK_CHANGE_TIME)
         
         # Start a separate thread for continuous link adjustments --Not needed currently
-        info('*** Starting background thread for continuous link adjustments\n')
-        adjustment_thread = threading.Thread(target=simulate_real_links, args=(net, links, SAT_BANDWIDTH, ETH_BANDWIDTH, LINK_CHANGE_INTERVAL), daemon=True)
-        adjustment_thread.start()
+        # info('*** Starting background thread for continuous link adjustments\n')
+        # adjustment_thread = threading.Thread(target=simulate_real_links, args=(net, links, SAT_BANDWIDTH, ETH_BANDWIDTH, LINK_CHANGE_INTERVAL), daemon=True)
+        # adjustment_thread.start()
 
         # Launch CLI
         # Note this does not work with link adjustments so do not expect
@@ -157,21 +149,21 @@ def main():
         #     info('*** Running CLI\n')
         #     CLI(net)
 
-        random_ping_test(net, PING_TEST_LENGTH)
+        while True:
+            simulate_real_links(net, links, SAT_BANDWIDTH, ETH_BANDWIDTH)
+            random_ping_test(net)
 
     except KeyboardInterrupt:
         # Handle keyboard interrupt gracefully
         info('*** KeyboardInterrupt received, stopping network\n')
 
     finally:
-        stop_flag.set()
-
         # Ensure the network stops and threads are joined properly
         info('*** Stopping network\n')
         net.stop()
 
         # Wait for the link adjustment thread to finish gracefully
-        adjustment_thread.join(timeout=5)
+        #adjustment_thread.join(timeout=5)
         # Allow the background thread to continue running even after stopping the network
         info('*** Extra threads stopped\n')
         
