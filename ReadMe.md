@@ -30,7 +30,7 @@ To access the containers (run bash inside the container):
 
 or
 
-`docker exec -it ryu_controller bash`
+`$ docker exec -it ryu_controller bash`
 
 `exec` means ececute command, `-it` means interactive terminal, followed by the container name, followed by `bash`, the command to execute. If you only need to do a single command without interactivity, you can change the command.
 
@@ -42,12 +42,12 @@ E.g. just `ryu-manager renet.py` with no interactivity:
 
 You can either interactively enter the docker container and run commands as described above, or run a single command in the docker container with `docker exec`.
 
-For ryu, it is `ryu_manager <controller_code.py>`
+For ryu, it is `ryu-manager <controller_code.py>`
 
 So either:
 ```
 user@local_computer:~$ docker exec -it ryu_controller bash
-root@ryu_container# ryu_manager /ryu_app/renet.py
+root@ryu_container# ryu-manager /ryu_app/renet.py
 ```
 
 or just `docker exec ryu_controller ryu-manager /ryu_app/renet.py`
