@@ -13,9 +13,8 @@ services:
     ports:
       - "6633:6633"  # OpenFlow default port
       - "8080:8080"  # Ryu REST API (if needed)
-    networks:
-      - mn_network
     tty: true # keep container open
+    network_mode: host
 
   mininet:
     image: iwaseyusuke/mininet
@@ -29,13 +28,8 @@ services:
       # - /lib/modules:/lib/modules
 
     # command: command here to run mininet once we have it setup
-    networks:
-      - mn_network
+    network_mode: host
     depends_on:
       - ryu
     tty: true # keep container open
-
-networks:
-  mn_network:
-    driver: bridge
 

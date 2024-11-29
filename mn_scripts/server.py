@@ -21,26 +21,33 @@ def main():
         print("Accepted connection from " + str(client_address))
 
         # Handle the connection in a new thread
-        client_thread = threading.Thread(target=handle_client, args=(client_socket,))
+        client_thread = threading.Thread(target=handle_client, args=(client_socket, client_address,))
         client_thread.start()
 
 
-def handle_client(client_socket):
+def handle_client(client_socket, address):
+    bytes = 0 
+
     try:
         # Receive data from the client
         while True:
             data = client_socket.recv(1024)
-            
+
             if not data:
                 # If no data is received, the client has closed the connection
                 break
             
+            bytes += 1024
             # print("Received data: " + data.decode('utf-8'))
     
     except Exception as e:
         print("Error handling client: " + str(e))
                                                                                                             
     finally:
+        filename = f"/mn_scripts/stats_{address[0]}_{address[1]}"
+        with open(filename, "w") as f:
+            f.write(str(bytes) + "\n")
+
         # Close the connection
         client_socket.close()
 

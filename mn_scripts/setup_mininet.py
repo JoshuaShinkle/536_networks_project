@@ -54,7 +54,7 @@ if __name__ == '__main__':
     setLogLevel('info')  # Set Mininet log level to info
 
     # Ryu Controller IP and Port
-    RYU_IP = "ryu_controller"  # Docker container name or actual IP
+    RYU_IP = "127.0.0.1"  # Docker container name or actual IP
     RYU_PORT = 6633
 
     # Create the network
@@ -94,6 +94,20 @@ if __name__ == '__main__':
     # Test connectivity
     # info('*** Testing network connectivity\n')
     # net.pingAll()
+
+    # Start experiment
+    hosts = [h1, h2]
+    h1.cmd('echo hello >> test.txt')
+    
+    # Start servers
+    for i, h in enumerate(hosts):
+        h.cmd(f'python3 /mn_scripts/server.py 10.0.0.{i+1} 10001 &')
+    
+    sleep(5)
+
+    # Start clients
+    for i, h in enumerate(hosts):
+        h.cmd(f'python3 /mn_scripts/client.py 10.0.0.{i%len(hosts) + 1} 10001 10 &')
 
     # Launch CLI
     info('*** Running CLI\n')
