@@ -10,26 +10,23 @@ services:
     # command: command to run controller here after we have it setup
     volumes:
       - ./ryu_app:/ryu_app
+    working_dir: /ryu_app
     ports:
       - "6633:6633"  # OpenFlow default port
       - "8080:8080"  # Ryu REST API (if needed)
+    network_mode: host
     tty: true # keep container open
     network_mode: host
 
   mininet:
     image: iwaseyusuke/mininet
     container_name: mininet
-
     privileged: true
-
     volumes:
       - ./mn_scripts:/mn_scripts
-      # - /tmp/.X11-unix:/tmp/.X11-unix
-      # - /lib/modules:/lib/modules
-
-    # command: command here to run mininet once we have it setup
+    # Set the working directory as the mininet scripts
+    working_dir: /mn_scripts
     network_mode: host
     depends_on:
       - ryu
     tty: true # keep container open
-

@@ -16,11 +16,10 @@ RUN apt-get update && apt-get install -y \
 RUN git clone https://github.com/faucetsdn/ryu.git /opt/ryu \
     && pip install -e /opt/ryu
 
+RUN pip install networkx
+
 # Set the working directory
 WORKDIR /ryu_app
-
-# Copy app folder
-COPY ryu_app /ryu_app
 
 # Expose ports
 EXPOSE 6633
