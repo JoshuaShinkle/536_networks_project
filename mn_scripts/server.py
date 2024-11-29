@@ -48,6 +48,7 @@ def handle_client(client_socket, address):
         with open(filename, "w") as f:
             f.write(str(bytes) + "\n")
 
+        print(f"Received {bytes} bytes from host {address[0]} on port {address[1]}") 
         # Close the connection
         client_socket.close()
 

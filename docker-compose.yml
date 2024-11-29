@@ -16,7 +16,6 @@ services:
       - "8080:8080"  # Ryu REST API (if needed)
     network_mode: host
     tty: true # keep container open
-    network_mode: host
 
   mininet:
     image: iwaseyusuke/mininet
