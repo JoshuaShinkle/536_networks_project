@@ -22,7 +22,7 @@ PING_INTERVAL = 6 # seconds
 PING_TEST_LENGTH = 18 # seconds
 
 # Ryu Controller IP and Port
-RYU_IP = "ryu_controller"  # Docker container name or actual IP
+RYU_IP = "127.0.0.1"  # Docker container name or actual IP
 RYU_PORT = 6633
 
 class RenetTopo(Topo):
@@ -34,10 +34,10 @@ class RenetTopo(Topo):
         host4 = self.addHost('h4')
 
         # Switches
-        switch1 = self.addSwitch('s1')
-        switch2 = self.addSwitch('s2')
-        switch3 = self.addSwitch('s3')
-        switch4 = self.addSwitch('s4')
+        switch1 = self.addSwitch('s1',  protocols="OpenFlow10")
+        switch2 = self.addSwitch('s2',  protocols="OpenFlow10")
+        switch3 = self.addSwitch('s3',  protocols="OpenFlow10")
+        switch4 = self.addSwitch('s4',  protocols="OpenFlow10")
 
         # Host Links
         self.addLink(host1, switch1, bw=ETH_BANDWIDTH)
@@ -111,7 +111,7 @@ def main():
         #topo = RenetTopo()
 
         # Initialize Mininet
-        net = Mininet(topo=RenetTopo(), controller=RemoteController, switch=OVSSwitch, link=TCLink)
+        net = Mininet(topo=RenetTopo(), controller=None, switch=OVSSwitch, link=TCLink)
 
         # Add the Ryu controller
         info('*** Adding Ryu controller\n')
@@ -120,6 +120,7 @@ def main():
         # Start the network
         info('*** Starting network\n')
         net.start()
+        CLI(net)
 
         # Links to dynamically change bandwidth
         links = [
