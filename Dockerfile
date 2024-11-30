@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y \
 RUN git clone https://github.com/faucetsdn/ryu.git /opt/ryu \
     && pip install -e /opt/ryu
 
-RUN pip install networkx
+RUN pip install networkx matplotlib
 
 # Set the working directory
 WORKDIR /ryu_app
