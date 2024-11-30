@@ -78,8 +78,6 @@ def setup_servers(net):
         print(f"Starting server at {h.IP()}")
         h.cmd(f"python3 server.py {h.IP()} 10001 &")
 
-    time.sleep(2)
-
 def run_experiment(net):
     hosts = net.hosts
     
@@ -138,7 +136,7 @@ def main():
         # Start the network
         info('*** Starting network\n')
         net.start()
-        CLI(net)
+        # CLI(net)
 
         # Links to dynamically change bandwidth
         links = [
@@ -167,13 +165,16 @@ def main():
         # with lock:
         #     info('*** Running CLI\n')
         #     CLI(net)
+        time.sleep(30)
 
         setup_servers(net)
 
-        while True:
+        for _ in range(3):
             simulate_real_links(net, links, SAT_BANDWIDTH, ETH_BANDWIDTH)
             random_ping_test(net)
             run_experiment(net)
+
+        time.sleep(5)
 
     except KeyboardInterrupt:
         # Handle keyboard interrupt gracefully

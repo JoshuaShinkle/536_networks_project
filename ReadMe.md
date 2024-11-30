@@ -57,3 +57,13 @@ or just `docker exec ryu_controller -- ryu-manager --observe-links /ryu_app/rene
 For mininet it is ran with python, so do `python3 /mn_scripts/setup_mininet_experiment.py` from within the mininet container.
 
 For now, we have the containers running on the host network, so the IP for the ryu_controller is 127.0.0.1 which you will have to specify in the python code when connecting the controller.
+
+## Running experiment
+
+After running `setup_mininet_experiment.py` run
+```
+cd mn_scripts
+./results.sh
+```
+
+This creates a .csv file with the number of packets successfully sent on each flow, along with some metadata. 
