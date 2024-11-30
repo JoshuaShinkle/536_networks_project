@@ -73,6 +73,24 @@ def simulate_real_links(net, links, min_bw=SAT_BANDWIDTH, max_bw=ETH_BANDWIDTH):
     change_link_bandwidth(net, link[0], link[1], new_bw)
     sleep(LINK_CHANGE_INTERVAL)
 
+def setup_servers(net):
+    for h in net.hosts:
+        print(f"Starting server at {h.IP()}")
+        h.cmd(f"python3 server.py {h.IP()} 10001 &")
+
+    time.sleep(2)
+
+def run_experiment(net):
+    hosts = net.hosts
+    
+    for i, src in enumerate(hosts):
+        dst = hosts[(i+1) % len(hosts)]
+
+        print(f"Sending to server {dst.IP()} from client {src.IP()}")
+        src.cmd(f"python3 client.py {dst.IP()} 10001 2 &")
+
+    time.sleep(5)
+
 def random_ping_test(net):
     # Get a list of all hosts in the network
     hosts = net.hosts
@@ -150,9 +168,12 @@ def main():
         #     info('*** Running CLI\n')
         #     CLI(net)
 
+        setup_servers(net)
+
         while True:
             simulate_real_links(net, links, SAT_BANDWIDTH, ETH_BANDWIDTH)
             random_ping_test(net)
+            run_experiment(net)
 
     except KeyboardInterrupt:
         # Handle keyboard interrupt gracefully
