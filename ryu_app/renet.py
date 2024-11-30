@@ -8,6 +8,7 @@ from ryu.topology import event
 from ryu.lib.packet import packet, ethernet
 import networkx as nx
 import matplotlib.pyplot as plt
+from ryu.app.ofctl.api import get_datapath
 
 
 class RENETController(app_manager.RyuApp):
@@ -19,12 +20,15 @@ class RENETController(app_manager.RyuApp):
         self.mst = nx.Graph()  # Minimum Spanning Tree
         self.mac_to_port = {}  # MAC to port mapping on switches
         self.mac_to_switch = {}  # MAC to switch mapping for hosts
+        self.blocked_ports = {}
+        self.datapaths = {}
 
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, ev):
         datapath = ev.msg.datapath
         self.logger.info(f"Switch connected: {datapath.id}")
         self.install_default_flows(datapath)
+        # self.datapaths[datapath.id] = datapath
 
     def install_default_flows(self, datapath):
         """
@@ -35,13 +39,13 @@ class RENETController(app_manager.RyuApp):
         ofproto = datapath.ofproto
 
         match = parser.OFPMatch(dl_type=0x88cc)  # LLDP EtherType
-        actions = [parser.OFPActionOutput(ofproto.OFPP_CONTROLLER, 0)]
+        actions = [] # [parser.OFPActionOutput(ofproto.OFPP_CONTROLLER, 0)]
         mod = parser.OFPFlowMod(
             datapath=datapath,
             match=match,
             cookie=0,
             command=ofproto.OFPFC_ADD,
-            priority=1,
+            priority=100,
             actions=actions
         )
         datapath.send_msg(mod)
@@ -51,6 +55,9 @@ class RENETController(app_manager.RyuApp):
         """
         Update topology when a new switch enters.
         """
+        # keep track of datapath
+        # print(ev.switch.dp)
+        # self.datapaths[ev.switch.dp.id] = ev.switch.dp
         self.update_topology()
 
     @set_ev_cls(event.EventLinkAdd)
@@ -64,12 +71,18 @@ class RENETController(app_manager.RyuApp):
         """
         Build or update the network graph.
         """
+
+        for dpid, ports in self.blocked_ports.items():
+            for port_no in ports:
+                self.set_port_flooding(dpid, port_no, enable=True)
+        self.blocked_ports.clear()
         self.network_graph.clear()
 
         # Add switches as nodes
         switches = get_switch(self, None)
         for switch in switches:
             dpid = switch.dp.id
+            self.datapaths[dpid] = switch.dp
             self.network_graph.add_node(dpid, type='switch')
 
         # Add links as edges
@@ -98,7 +111,13 @@ class RENETController(app_manager.RyuApp):
         self.mst = nx.minimum_spanning_tree(self.network_graph.to_undirected())
         self.logger.info("\nUpdated MST:\nEdges: %s\n", self.mst.edges(data=False))
 
-        # create dummy graph for visualization
+        # Block ports not in MST
+        for src, dst, edge_data in self.network_graph.edges(data=True):
+            if not self.mst.has_edge(src, dst) and self.network_graph.nodes[src]['type'] == 'switch':
+                self.set_port_flooding(src, edge_data['src_port'], enable=False)
+                self.blocked_ports.setdefault(src, set()).add(edge_data['src_port'])
+                # pass
+
 
 
         # draw the network graph
@@ -110,6 +129,34 @@ class RENETController(app_manager.RyuApp):
         plt.savefig("mst.png")
         plt.close()
 
+    def set_port_flooding(self, dpid, port_no, enable):
+        """
+        Enable or disable flooding on a specific port of a switch.
+        """
+        datapath = self.get_datapath(dpid)
+        if not datapath:
+            self.logger.warning("Datapath for switch %s not found.", dpid)
+            return
+
+        parser = datapath.ofproto_parser
+        ofproto = datapath.ofproto
+
+        config = 0
+        mask = ofproto.OFPPC_NO_FLOOD
+
+        if not enable:
+            config = mask
+
+        mod = parser.OFPPortMod(
+            datapath=datapath,
+            port_no=port_no,
+            hw_addr=datapath.ports[port_no].hw_addr,
+            config=config,
+            mask=mask
+        )
+        datapath.send_msg(mod)
+        state = "enabled" if enable else "disabled"
+        self.logger.info(f"Flooding {state} on port {port_no} of switch {dpid}.")
 
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
@@ -127,12 +174,20 @@ class RENETController(app_manager.RyuApp):
         dst = eth.dst
         dpid = datapath.id
 
+
+
         # Ignore LLDP packets
-        if eth.ethertype == 0x88cc:
+        if eth.ethertype == 0x88cc:# or eth.ethertype == 0x86DD:
+            # print("Ignoring LLDP packet")
             return
+
+        print(f"Packet in: {src} -> {dst} on switch {dpid} port {in_port} of type {eth.ethertype}")
+        
 
         # Learn the source host's switch and port
         self.mac_to_switch[src] = {'dpid': dpid, 'port': in_port, 'datapath': datapath}
+
+        
 
         # Add the source host to the graph if not already present
         if src not in self.network_graph:
@@ -157,10 +212,16 @@ class RENETController(app_manager.RyuApp):
             self.logger.info(f"Path computed from {src} to {dst}: {path}")
             self.install_path_flows(path, src, dst)
             self.install_path_flows(path[::-1], dst, src)
+            # send packet
+            out_port = datapath.ofproto.OFPP_TABLE
+            actions = [datapath.ofproto_parser.OFPActionOutput(out_port)]
+            self.send_packet(datapath, msg.buffer_id, in_port, actions, msg.data)
+            return
         else:
             # Flood the packet to discover the destination
-            self.logger.info(f"Flooding packet: {src} -> {dst} on switch {dpid} port {in_port} of type {eth}")
+            self.logger.info(f"Flooding packet")
             self.flood_packet_mst(datapath, in_port, msg)
+            return
 
 
     def flood_packet_mst(self, datapath, in_port, msg):
@@ -168,13 +229,19 @@ class RENETController(app_manager.RyuApp):
         Flood the packet along the MST.
         """
         dpid = datapath.id
-        for neighbor in self.mst.neighbors(dpid):
-            edge_data = self.network_graph.get_edge_data(dpid, neighbor)
-            if edge_data['src_port'] != in_port:
-                # print(f"Flooding packet from {dpid} to {neighbor}")
-                out_port = edge_data['src_port']
-                actions = [datapath.ofproto_parser.OFPActionOutput(out_port)]
-                self.send_packet(datapath, msg.buffer_id, in_port, actions, msg.data)
+        ofproto = datapath.ofproto
+        parser = datapath.ofproto_parser
+        # for neighbor in self.mst.neighbors(dpid):
+        #     edge_data = self.network_graph.get_edge_data(dpid, neighbor)
+        #     if edge_data['src_port'] != in_port:
+        #         # print(f"Flooding packet from {dpid} to {neighbor}")
+        #         out_port = edge_data['src_port']
+        #         actions = [datapath.ofproto_parser.OFPActionOutput(out_port)]
+        #         self.send_packet(datapath, msg.buffer_id, in_port, actions, msg.data)
+
+        # just flood to all neighbors
+        actions = [datapath.ofproto_parser.OFPActionOutput(ofproto.OFPP_FLOOD)]
+        self.send_packet(datapath, msg.buffer_id, in_port, actions, msg.data)
 
 
     def install_path_flows(self, path, src, dst):
@@ -240,6 +307,12 @@ class RENETController(app_manager.RyuApp):
         """
         Retrieve the datapath object for a given DPID.
         """
+        if dpid in self.datapaths:
+            return self.datapaths[dpid]
+        else:
+            print(f"Datapath for switch {dpid} not found.")
+            print(f"Available datapaths: {self.datapaths}")
+            return None
         for dp in self.mac_to_switch.values():
             if dp['dpid'] == dpid:
                 return dp['datapath']
