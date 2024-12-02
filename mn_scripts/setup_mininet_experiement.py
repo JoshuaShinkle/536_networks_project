@@ -10,6 +10,7 @@ try:
     import time
     import threading
     import os
+    import json
 except:
     Exception(ImportError)
 
@@ -24,6 +25,8 @@ PING_TEST_LENGTH = 18 # seconds
 # Ryu Controller IP and Port
 RYU_IP = "127.0.0.1"  # Docker container name or actual IP
 RYU_PORT = 6633
+
+
 
 class RenetTopo(Topo):
     def build(self):
@@ -53,7 +56,7 @@ class RenetTopo(Topo):
         self.addLink(switch2, switch3, bw=ETH_BANDWIDTH)
         self.addLink(switch3, switch4, bw=ETH_BANDWIDTH)
 
-def change_link_bandwidth(net, node1, node2, new_bw):
+def change_link_bandwidth(net, node1, node2, new_bw, current_link_bandwidths={}):
     try:
         link = net.linksBetween(net[node1], net[node2])[0]  # Get the link object
         info(f"*** Changing bandwidth between {node1} and {node2} to {new_bw} Mbps\n")
@@ -61,16 +64,25 @@ def change_link_bandwidth(net, node1, node2, new_bw):
         # Link Bandwidth changes both interfaces 
         link.intf1.config(bw=new_bw)
         link.intf2.config(bw=new_bw)
+        # Update the current link bandwidths dictionary
+        link_key = f"{int(net[node1].dpid)}-{int(net[node2].dpid)}"
+        current_link_bandwidths[link_key] = new_bw
+        link_key = f"{int(net[node2].dpid)}-{int(net[node1].dpid)}"
+        current_link_bandwidths[link_key] = new_bw
+        with open('link_bandwidths.json', 'w') as f:
+            json.dump(current_link_bandwidths, f)
         info(f"*** Bandwidth between {node1} and {node2} updated successfully\n")
+
+
 
     # Index error that results from some miscall of the mininet node networks (no link usually)
     except IndexError:
         info(f"*** Error: No link found between {node1} and {node2}\n")
 
-def simulate_real_links(net, links, min_bw=SAT_BANDWIDTH, max_bw=ETH_BANDWIDTH):
+def simulate_real_links(net, links, min_bw=SAT_BANDWIDTH, max_bw=ETH_BANDWIDTH, current_link_bandwidths={}):
     link = random.choice(links)
     new_bw = random.randint(min_bw, max_bw)
-    change_link_bandwidth(net, link[0], link[1], new_bw)
+    change_link_bandwidth(net, link[0], link[1], new_bw, current_link_bandwidths)
     sleep(LINK_CHANGE_INTERVAL)
 
 def setup_servers(net):
@@ -140,10 +152,10 @@ def main():
 
         # Links to dynamically change bandwidth
         links = [
-            ('h1', 's1'),
-            ('h2', 's1'),
-            ('h3', 's3'),
-            ('h4', 's2'),
+            # ('h1', 's1'),
+            # ('h2', 's1'),
+            # ('h3', 's3'),
+            # ('h4', 's2'),
             ('s1', 's2'),
             ('s1', 's4'),
             ('s1', 's3'),
@@ -165,12 +177,28 @@ def main():
         # with lock:
         #     info('*** Running CLI\n')
         #     CLI(net)
-        time.sleep(30)
+        # time.sleep(30)
 
         setup_servers(net)
 
+        current_link_bandwidths = {}
+
+        for link in links:
+            node1, node2 = link
+            link = net.linksBetween(net[node1], net[node2])[0]
+            node1, node2 = link.intf1.node, link.intf2.node
+            dpid1, dpid2 = node1.dpid, node2.dpid
+            if dpid1 and dpid2:
+                link_key = f"{int(dpid1)}-{int(dpid2)}"
+                val = link.intf1.params['bw']
+                current_link_bandwidths[link_key] = val
+                # other way
+                link_key = f"{int(dpid2)}-{int(dpid1)}"
+                current_link_bandwidths[link_key] = val
+                info(f"*** Initialized link {link_key} with bandwidth {current_link_bandwidths[link_key]} Mbps\n")
+
         for _ in range(3):
-            simulate_real_links(net, links, SAT_BANDWIDTH, ETH_BANDWIDTH)
+            simulate_real_links(net, links, SAT_BANDWIDTH, ETH_BANDWIDTH, current_link_bandwidths)
             random_ping_test(net)
             run_experiment(net)
 

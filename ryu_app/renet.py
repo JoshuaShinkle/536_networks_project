@@ -1,3 +1,4 @@
+import json
 from ryu.base import app_manager
 from ryu.controller import ofp_event
 from ryu.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER
@@ -9,6 +10,8 @@ from ryu.lib.packet import packet, ethernet
 import networkx as nx
 import matplotlib.pyplot as plt
 from ryu.app.ofctl.api import get_datapath
+from ryu.lib import hub
+import time
 
 
 class RENETController(app_manager.RyuApp):
@@ -22,13 +25,16 @@ class RENETController(app_manager.RyuApp):
         self.mac_to_switch = {}  # MAC to switch mapping for hosts
         self.blocked_ports = {}
         self.datapaths = {}
+        self.stats_interval = 5
+        self.flow_store = {}  # Store flow metrics
+        self.link_store = {}  # Store link metrics
 
-    @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
-    def switch_features_handler(self, ev):
-        datapath = ev.msg.datapath
-        self.logger.info(f"Switch connected: {datapath.id}")
-        self.install_default_flows(datapath)
-        # self.datapaths[datapath.id] = datapath
+    # @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
+    # def switch_features_handler(self, ev):
+    #     datapath = ev.msg.datapath
+    #     self.logger.info(f"Switch connected: {datapath.id}")
+    #     self.install_default_flows(datapath)
+    #     # self.datapaths[datapath.id] = datapath
 
     def install_default_flows(self, datapath):
         """
@@ -55,10 +61,29 @@ class RENETController(app_manager.RyuApp):
         """
         Update topology when a new switch enters.
         """
+        # print(ev.__dict__)
+        datapath = ev.switch.dp
         # keep track of datapath
         # print(ev.switch.dp)
         # self.datapaths[ev.switch.dp.id] = ev.switch.dp
+        hub.spawn(self._send_stats_request, datapath)
         self.update_topology()
+
+    # @set_ev_cls(ofp_event.EventOFPSwitchFeatures, MAIN_DISPATCHER)
+    # def _switch_features_handler(self, ev):
+    #     """Handles the switch feature reply."""
+    #     datapath = ev.msg.datapath
+    #     self.datapaths[datapath.id] = datapath
+
+    #     # Send a default flow mod to prevent packet flooding by default
+    #     ofproto = datapath.ofproto
+    #     parser = datapath.ofproto_parser
+    #     match = parser.OFPMatch()
+    #     actions = []
+    #     # self.add_flow(datapath, 0, match, actions)  # Drop all by default
+    #     print(f"Switch {datapath.id} connected.")
+
+    #     hub.spawn(self._send_stats_request, datapath)
 
     @set_ev_cls(event.EventLinkAdd)
     def link_add_handler(self, ev):
@@ -159,6 +184,105 @@ class RENETController(app_manager.RyuApp):
         self.logger.info(f"Flooding {state} on port {port_no} of switch {dpid}.")
 
 
+    def _send_stats_request(self, datapath):
+        """Send a periodic stats request to the controller for flow and link metrics."""
+        ofproto = datapath.ofproto
+        parser = datapath.ofproto_parser
+
+        while True:
+            # Send Flow Stats Request
+            # flow_stats_req = parser.OFPStatsRequest(datapath, flags=0)
+            empty_match = parser.OFPMatch()
+            flow_stats_req = parser.OFPFlowStatsRequest(datapath, flags=0, match=empty_match, table_id=0, out_port=ofproto.OFPP_NONE)
+            datapath.send_msg(flow_stats_req)
+            self.logger.info("Sent flow stats request to datapath %s", datapath.id)
+
+            # Send Port Stats Request
+            port_stats_req = parser.OFPPortStatsRequest(datapath, flags=0, port_no=ofproto.OFPP_NONE)
+            datapath.send_msg(port_stats_req)
+            self.logger.info("Sent port stats request to datapath %s", datapath.id)
+
+
+
+            # Sleep for the interval before sending the next request
+            time.sleep(self.stats_interval)
+
+    @set_ev_cls(ofp_event.EventOFPFlowStatsReply, MAIN_DISPATCHER)
+    def _flow_stats_reply_handler(self, ev):
+        """Handle flow statistics reply from the switch."""
+        datapath = ev.msg.datapath
+        body = ev.msg.body
+
+        for stat in body:
+            # Flow store stores source, destination, current path, rate, and other metrics
+            # print("Stat match", stat.match)
+            flow_key = (stat.match.dl_src, stat.match.dl_dst, stat.match.tp_src, stat.match.tp_dst)
+            prev_flow_info = self.flow_store.get(flow_key, {})
+            if prev_flow_info == {}:
+                prev_flow_info['recieved_bytes'] = 0
+            
+            new_flow_info = {
+                'src_dst': flow_key,
+                'current_path': self.flow_store.get(flow_key, {}).get('current_path', []), # Retrieve the real path from flow store
+                'current_rate': (stat.byte_count - prev_flow_info['recieved_bytes']) / self.stats_interval,
+                'recieved_bytes': stat.byte_count,
+                'desired_rate': 1000000,  # 1 Mbps
+                'update_time': time.time(),
+                'active': True,  # Assuming flow is active if stats exist
+                'input_port': stat.match.in_port
+            }
+            self.flow_store[flow_key] = new_flow_info
+            self.logger.info("Updated flow stats for %s: %s", flow_key, new_flow_info)
+
+    @set_ev_cls(ofp_event.EventOFPPortStatsReply, MAIN_DISPATCHER)
+    def _port_stats_reply_handler(self, ev):
+        """Handle port statistics reply from the switch."""
+        datapath = ev.msg.datapath
+        body = ev.msg.body
+
+        for stat in body:
+            # Find the connected switch for the given port
+            dpid1 = datapath.id
+            port_no = stat.port_no
+            print(f'port number {port_no}')
+            dpid2 = None
+            for neighbor in self.network_graph.neighbors(dpid1):
+                edge_data = self.network_graph.get_edge_data(dpid1, neighbor)
+                print (f'edge data {edge_data}')
+                if 'src_port' in edge_data and edge_data['src_port'] == port_no:
+                    dpid2 = neighbor
+                    break
+                elif 'dst_port' in edge_data and edge_data['dst_port'] == port_no:
+                    dpid2 = neighbor
+                    break
+
+            if dpid2 is None:
+                # raise ValueError(f"Neighbor switch not found for port {port_no} on switch {dpid1}")
+                continue
+
+            # Link store stores source, destination, current rate, and other metrics
+            link_key = (dpid1, dpid2)
+            prev_link_info = self.link_store.get(link_key, {})
+            if prev_link_info == {}:
+                prev_link_info['recieved_bytes'] = 0
+
+            new_link_info = {
+                'src_dst': link_key,
+                'current_rate': (stat.rx_bytes - prev_link_info['recieved_bytes']) / self.stats_interval,
+                'recieved_bytes': stat.rx_bytes,
+                'desired_rate': 1000000,  # 1 Mbps
+                'update_time': time.time(),
+                'active': True,  # Assuming link is active if stats exist
+            }
+
+            with open('/mn_scripts/link_bandwidths.json', 'w') as f:
+                current_link_bandwidths = json.load(f)
+                link_key = f"{dpid1}-{dpid2}"
+                current_link_bandwidths[link_key] = new_link_info['current_rate']
+
+            self.link_store[link_key] = new_link_info
+            self.logger.info("Updated port stats for %s: %s", link_key, new_link_info)
+
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def packet_in_handler(self, ev):
         """
@@ -208,6 +332,7 @@ class RENETController(app_manager.RyuApp):
             src_dpid = self.mac_to_switch[src]['dpid']
             dst_dpid = self.mac_to_switch[dst]['dpid']
             path = nx.shortest_path(self.network_graph, src, dst)
+            # path = self.path_selection(src_dpid, dst_dpid)
 
             self.logger.info(f"Path computed from {src} to {dst}: {path}")
             self.install_path_flows(path, src, dst)
@@ -222,6 +347,10 @@ class RENETController(app_manager.RyuApp):
             self.logger.info(f"Flooding packet")
             self.flood_packet_mst(datapath, in_port, msg)
             return
+        
+
+    def path_selection(self, src_dpid, dst_dpid):
+        pass
 
 
     def flood_packet_mst(self, datapath, in_port, msg):
