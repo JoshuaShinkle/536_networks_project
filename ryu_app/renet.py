@@ -6,12 +6,15 @@ from ryu.controller.handler import set_ev_cls
 from ryu.ofproto import ofproto_v1_0
 from ryu.topology.api import get_switch, get_link
 from ryu.topology import event
-from ryu.lib.packet import packet, ethernet
+from ryu.lib.packet import packet, ethernet, tcp, udp
 import networkx as nx
 import matplotlib.pyplot as plt
 from ryu.app.ofctl.api import get_datapath
 from ryu.lib import hub
 import time
+
+
+DESIRED_RATE = 1000000  # 1 Mbps
 
 
 class RENETController(app_manager.RyuApp):
@@ -28,6 +31,7 @@ class RENETController(app_manager.RyuApp):
         self.stats_interval = 5
         self.flow_store = {}  # Store flow metrics
         self.link_store = {}  # Store link metrics
+        self.flows_per_link = {}  # Store flows per link
 
     # @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     # def switch_features_handler(self, ev):
@@ -202,7 +206,12 @@ class RENETController(app_manager.RyuApp):
             datapath.send_msg(port_stats_req)
             self.logger.info("Sent port stats request to datapath %s", datapath.id)
 
-
+            for flow_key, flow_info in self.flow_store.items():
+                if flow_info['active']:
+                    flow_info['active_countdown'] -= 1
+                    if flow_info['active_countdown'] == 0:
+                        flow_info['active'] = False
+                        self.logger.info("Flow %s marked as inactive", flow_key)
 
             # Sleep for the interval before sending the next request
             time.sleep(self.stats_interval)
@@ -226,10 +235,12 @@ class RENETController(app_manager.RyuApp):
                 'current_path': self.flow_store.get(flow_key, {}).get('current_path', []), # Retrieve the real path from flow store
                 'current_rate': (stat.byte_count - prev_flow_info['recieved_bytes']) / self.stats_interval,
                 'recieved_bytes': stat.byte_count,
-                'desired_rate': 1000000,  # 1 Mbps
+                'desired_rate': DESIRED_RATE,  # 1 Mbps
                 'update_time': time.time(),
                 'active': True,  # Assuming flow is active if stats exist
-                'input_port': stat.match.in_port
+                'input_port': stat.match.in_port,
+                'active_countdown': 2,
+                'recent_rerouting_countdown': 0
             }
             self.flow_store[flow_key] = new_flow_info
             self.logger.info("Updated flow stats for %s: %s", flow_key, new_flow_info)
@@ -268,17 +279,17 @@ class RENETController(app_manager.RyuApp):
 
             new_link_info = {
                 'src_dst': link_key,
-                'current_rate': (stat.rx_bytes - prev_link_info['recieved_bytes']) / self.stats_interval,
+                'usage': (stat.rx_bytes - prev_link_info['recieved_bytes']) / self.stats_interval,
                 'recieved_bytes': stat.rx_bytes,
                 'desired_rate': 1000000,  # 1 Mbps
                 'update_time': time.time(),
                 'active': True,  # Assuming link is active if stats exist
             }
 
-            with open('/mn_scripts/link_bandwidths.json', 'w') as f:
+            with open('/mn_scripts/link_bandwidths.json', 'r') as f:
                 current_link_bandwidths = json.load(f)
                 link_key = f"{dpid1}-{dpid2}"
-                current_link_bandwidths[link_key] = new_link_info['current_rate']
+                new_link_info['current_bandwidth'] = current_link_bandwidths.get(link_key, 0)
 
             self.link_store[link_key] = new_link_info
             self.logger.info("Updated port stats for %s: %s", link_key, new_link_info)
@@ -331,8 +342,21 @@ class RENETController(app_manager.RyuApp):
             # Compute path and install flow rules
             src_dpid = self.mac_to_switch[src]['dpid']
             dst_dpid = self.mac_to_switch[dst]['dpid']
-            path = nx.shortest_path(self.network_graph, src, dst)
-            # path = self.path_selection(src_dpid, dst_dpid)
+            # path = nx.shortest_path(self.network_graph, src, dst)
+
+            # Extract TCP/UDP ports if available
+            tcp_pkt = pkt.get_protocol(tcp.tcp)
+            udp_pkt = pkt.get_protocol(udp.udp)
+            if tcp_pkt:
+                src_port = tcp_pkt.src_port
+                dst_port = tcp_pkt.dst_port
+            elif udp_pkt:
+                src_port = udp_pkt.src_port
+                dst_port = udp_pkt.dst_port
+            else:
+                raise ValueError("Unknown transport protocol")
+            
+            path = self.path_selection(src_dpid, dst_dpid, src_port, dst_port)
 
             self.logger.info(f"Path computed from {src} to {dst}: {path}")
             self.install_path_flows(path, src, dst)
@@ -349,8 +373,41 @@ class RENETController(app_manager.RyuApp):
             return
         
 
-    def path_selection(self, src_dpid, dst_dpid):
-        pass
+
+    def path_selection(self, src_dpid, dst_dpid, src_port, dst_port):
+        """
+        Compute the optimal path between two switches, considering link capacities and flow requirements.
+        """
+        # Get K shortest paths
+        K = 5  # Number of shortest paths to consider
+        paths = list(nx.shortest_simple_paths(self.network_graph, source=src_dpid, target=dst_dpid))
+        paths = paths[:K]  # Limit to K shortest paths
+
+
+        path_list = {}
+
+        for path in paths:
+            # Calculate the minimum bandwidth along this path
+            path_throughput = float('inf')
+            for i in range(len(path) - 1):
+                link = self.link_store[f'{path[i]}-{path[i + 1]}']
+                link_capacity = link['current_bandwidth']
+                link_usage = link['usage']
+                available_bandwidth = link_capacity - link_usage
+                fair_share = link_capacity / (self.flows_per_link[f'{path[i]}-{path[i + 1]}'] + 1)
+                expected_throughput = max(available_bandwidth, fair_share)
+                if expected_throughput < path_throughput:
+                    path_throughput = expected_throughput
+            path_list[tuple(path)] = path_throughput
+        
+        path_list = sorted(path_list.items(), key=lambda x: x[1])
+
+        for path, throughput in path_list:
+            if throughput > DESIRED_RATE:
+                self.logger.info(f"Selected path from {src_dpid} to {dst_dpid}: {path}")
+                return path
+        self.logger.info(f"Selected path from {src_dpid} to {dst_dpid}: {path_list[-1][0]}")
+        return path_list[-1][0]
 
 
     def flood_packet_mst(self, datapath, in_port, msg):
