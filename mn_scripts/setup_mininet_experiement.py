@@ -80,9 +80,10 @@ def change_link_bandwidth(net, node1, node2, new_bw, current_link_bandwidths={})
         info(f"*** Error: No link found between {node1} and {node2}\n")
 
 def simulate_real_links(net, links, min_bw=SAT_BANDWIDTH, max_bw=ETH_BANDWIDTH, current_link_bandwidths={}):
-    link = random.choice(links)
-    new_bw = random.randint(min_bw, max_bw)
-    change_link_bandwidth(net, link[0], link[1], new_bw, current_link_bandwidths)
+    # link = random.choice(links)
+    for link in links:
+        new_bw = random.randint(min_bw, max_bw)
+        change_link_bandwidth(net, link[0], link[1], new_bw, current_link_bandwidths)
     sleep(LINK_CHANGE_INTERVAL)
 
 def setup_servers(net):
@@ -96,10 +97,22 @@ def run_experiment(net):
     for i, src in enumerate(hosts):
         dst = hosts[(i+1) % len(hosts)]
 
-        print(f"Sending to server {dst.IP()} from client {src.IP()}")
-        src.cmd(f"python3 client.py {dst.IP()} 10001 2 &")
+        if i == 0:
+            print(f"Sending to server {dst.IP()} from client {src.IP()}")
+            src.cmd(f"python3 client.py {dst.IP()} 10001 100 &")
 
-    time.sleep(5)
+        else:
+            print(f"Sending to server {dst.IP()} from client {src.IP()}")
+            src.cmd(f"python3 client.py {dst.IP()} 10001 10 &")
+    
+    time.sleep(7)
+
+    for i, src in enumerate(hosts):
+        dst = hosts[(i+1) % len(hosts)]
+
+        if i == 0:
+            print(f"Sending to server {dst.IP()} from client {src.IP()}")
+            src.cmd(f"python3 client.py {dst.IP()} 10001 100 &")
 
 def random_ping_test(net):
     # Get a list of all hosts in the network
@@ -199,7 +212,7 @@ def main():
 
         for _ in range(3):
             simulate_real_links(net, links, SAT_BANDWIDTH, ETH_BANDWIDTH, current_link_bandwidths)
-            random_ping_test(net)
+            # random_ping_test(net)
             run_experiment(net)
 
         time.sleep(5)
