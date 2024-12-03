@@ -6,10 +6,12 @@ services:
       context: .
       dockerfile: Dockerfile
     image: custom/ryu-controller:latest
+    privileged: true
     container_name: ryu_controller
     # command: command to run controller here after we have it setup
     volumes:
       - ./ryu_app:/ryu_app
+      - ./mn_scripts:/mn_scripts
     working_dir: /ryu_app
     ports:
       - "6633:6633"  # OpenFlow default port
