@@ -13,7 +13,7 @@ def create_connection(host, port):
         print("Connection succeeded")
 
         start_time = time.time()
-        while time.time() - start_time < 30:
+        while time.time() - start_time < 50:
             sock.sendall("Random message".encode('utf-8'))
 
         return sock

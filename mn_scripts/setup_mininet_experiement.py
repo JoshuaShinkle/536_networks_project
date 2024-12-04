@@ -1,18 +1,17 @@
-try:
-    from mininet.net import Mininet
-    from mininet.topo import Topo
-    from mininet.node import RemoteController, OVSSwitch
-    from mininet.link import TCLink  # For bandwidth-limited links
-    from mininet.log import setLogLevel, info
-    from mininet.cli import CLI
-    import random
-    from time import sleep
-    import time
-    import threading
-    import os
-    import json
-except:
-    Exception(ImportError)
+
+from mininet.net import Mininet
+from mininet.topo import Topo
+from mininet.node import RemoteController, OVSSwitch
+from mininet.link import TCLink  # For bandwidth-limited links
+from mininet.log import setLogLevel, info
+from mininet.cli import CLI
+import random
+from time import sleep
+import time
+import threading
+import os
+import json
+
 
 # Defining constants for links easily changeable or customizable to each link
 # For performance purposes keep it between 1 <= bw <= 16
@@ -26,35 +25,53 @@ PING_TEST_LENGTH = 18 # seconds
 RYU_IP = "127.0.0.1"  # Docker container name or actual IP
 RYU_PORT = 6633
 
+N_SWITCHES = 6
+
+server_threads = []
+client_threads = []
+
 
 
 class RenetTopo(Topo):
     def build(self):
+        
         # Hosts
-        host1 = self.addHost('h1')
-        host2 = self.addHost('h2')
-        host3 = self.addHost('h3')
-        host4 = self.addHost('h4')
+        # host1 = self.addHost('h1')
+        # host2 = self.addHost('h2')
+        # host3 = self.addHost('h3')
+        # host4 = self.addHost('h4')
+
+        hosts = []
+
+        for count in range(10):
+            host = self.addHost(f'h{count+1}')
+            hosts.append(host)
 
         # Switches
-        switch1 = self.addSwitch('s1',  protocols="OpenFlow10")
-        switch2 = self.addSwitch('s2',  protocols="OpenFlow10")
-        switch3 = self.addSwitch('s3',  protocols="OpenFlow10")
-        switch4 = self.addSwitch('s4',  protocols="OpenFlow10")
+        switches = []
+        for count in range(N_SWITCHES):
+            switch = self.addSwitch(f's{count+1}', protocols="OpenFlow10")
+            switches.append(switch)
+
+
 
         # Host Links
-        self.addLink(host1, switch1, bw=ETH_BANDWIDTH)
-        self.addLink(host2, switch1, bw=ETH_BANDWIDTH)
-        self.addLink(host3, switch3, bw=ETH_BANDWIDTH)
-        self.addLink(host4, switch2, bw=ETH_BANDWIDTH)
+        # self.addLink(host1, switch1, bw=ETH_BANDWIDTH)
+        # self.addLink(host2, switch1, bw=ETH_BANDWIDTH)
+        # self.addLink(host3, switch3, bw=ETH_BANDWIDTH)
+        # self.addLink(host4, switch2, bw=ETH_BANDWIDTH)
 
-        # Switch Links
-        self.addLink(switch1, switch2, bw=ETH_BANDWIDTH)
-        self.addLink(switch1, switch4, bw=ETH_BANDWIDTH)
-        self.addLink(switch1, switch3, bw=SAT_BANDWIDTH)
-        self.addLink(switch2, switch4, bw=ETH_BANDWIDTH)
-        self.addLink(switch2, switch3, bw=ETH_BANDWIDTH)
-        self.addLink(switch3, switch4, bw=ETH_BANDWIDTH)
+        for count in range(10):
+            host = hosts[count]
+            switch = switches[count % N_SWITCHES]
+            print(f"Adding link between {host} and {switch}")
+            self.addLink(host, switch, bw=ETH_BANDWIDTH)
+
+
+        # Fully connect the switches in a loop
+        for i in range(len(switches)):
+            for j in range(i + 1, len(switches)):
+                self.addLink(switches[i], switches[j], bw=ETH_BANDWIDTH)
 
 def change_link_bandwidth(net, node1, node2, new_bw, current_link_bandwidths={}):
     try:
@@ -65,9 +82,9 @@ def change_link_bandwidth(net, node1, node2, new_bw, current_link_bandwidths={})
         link.intf1.config(bw=new_bw)
         link.intf2.config(bw=new_bw)
         # Update the current link bandwidths dictionary
-        link_key = f"{int(net[node1].dpid)}-{int(net[node2].dpid)}"
+        link_key = f"{int(net[node1].dpid, base=16)}-{int(net[node2].dpid, base=16)}"
         current_link_bandwidths[link_key] = new_bw
-        link_key = f"{int(net[node2].dpid)}-{int(net[node1].dpid)}"
+        link_key = f"{int(net[node2].dpid, base=16)}-{int(net[node1].dpid, base=16)}"
         current_link_bandwidths[link_key] = new_bw
         with open('link_bandwidths.json', 'w') as f:
             json.dump(current_link_bandwidths, f)
@@ -80,16 +97,26 @@ def change_link_bandwidth(net, node1, node2, new_bw, current_link_bandwidths={})
         info(f"*** Error: No link found between {node1} and {node2}\n")
 
 def simulate_real_links(net, links, min_bw=SAT_BANDWIDTH, max_bw=ETH_BANDWIDTH, current_link_bandwidths={}):
-    # link = random.choice(links)
-    for link in links:
-        new_bw = random.randint(min_bw, max_bw)
-        change_link_bandwidth(net, link[0], link[1], new_bw, current_link_bandwidths)
-    sleep(LINK_CHANGE_INTERVAL)
+    link = random.choice(links)
+    new_bw = random.randint(min_bw, max_bw)
+    change_link_bandwidth(net, link[0], link[1], new_bw, current_link_bandwidths)
+    # sleep(LINK_CHANGE_INTERVAL)
 
 def setup_servers(net):
+    def server_thread(host):
+        host.cmd(f"python3 server.py {host.IP()} 10001 &")
+
     for h in net.hosts:
         print(f"Starting server at {h.IP()}")
-        h.cmd(f"python3 server.py {h.IP()} 10001 &")
+        server_thread(h)
+
+def start_n_flows(net, n_flows):
+    hosts = net.hosts
+    # Randomly choose two distinct hosts
+    for i in range(n_flows):
+        host1, host2 = random.sample(hosts, 2)
+        print(f"Starting flow from {host1.IP()} to {host2.IP()}")
+        host1.cmd(f"python3 client.py {host2.IP()} 10001 1 &")
 
 def run_experiment(net):
     hosts = net.hosts
@@ -97,22 +124,10 @@ def run_experiment(net):
     for i, src in enumerate(hosts):
         dst = hosts[(i+1) % len(hosts)]
 
-        if i == 0:
-            print(f"Sending to server {dst.IP()} from client {src.IP()}")
-            src.cmd(f"python3 client.py {dst.IP()} 10001 100 &")
+        print(f"Sending to server {dst.IP()} from client {src.IP()}")
+        src.cmd(f"python3 client.py {dst.IP()} 10001 2 &")
 
-        else:
-            print(f"Sending to server {dst.IP()} from client {src.IP()}")
-            src.cmd(f"python3 client.py {dst.IP()} 10001 10 &")
-    
-    time.sleep(7)
-
-    for i, src in enumerate(hosts):
-        dst = hosts[(i+1) % len(hosts)]
-
-        if i == 0:
-            print(f"Sending to server {dst.IP()} from client {src.IP()}")
-            src.cmd(f"python3 client.py {dst.IP()} 10001 100 &")
+    time.sleep(5)
 
 def random_ping_test(net):
     # Get a list of all hosts in the network
@@ -164,18 +179,13 @@ def main():
         # CLI(net)
 
         # Links to dynamically change bandwidth
-        links = [
-            # ('h1', 's1'),
-            # ('h2', 's1'),
-            # ('h3', 's3'),
-            # ('h4', 's2'),
-            ('s1', 's2'),
-            ('s1', 's4'),
-            ('s1', 's3'),
-            ('s2', 's4'),
-            ('s2', 's3'),
-            ('s3', 's4'),
-        ]
+        switch_names = [f's{i+1}' for i in range(N_SWITCHES)]
+        links = []
+
+        for i in range(len(switch_names)):
+            for j in range(i+1, len(switch_names)):
+                links.append((switch_names[i], switch_names[j]))
+        
         # arguements are mininet object, link list, min_bw at least > 0, max_bw, intervals between changing
         #simulate_real_links(net,links,SAT_BANDWIDTH,ETH_BANDWIDTH,LINK_CHANGE_TIME)
         
@@ -202,20 +212,37 @@ def main():
             node1, node2 = link.intf1.node, link.intf2.node
             dpid1, dpid2 = node1.dpid, node2.dpid
             if dpid1 and dpid2:
-                link_key = f"{int(dpid1)}-{int(dpid2)}"
+                link_key = f"{int(dpid1, base=16)}-{int(dpid2, base=16)}"
                 val = link.intf1.params['bw']
                 current_link_bandwidths[link_key] = val
                 # other way
-                link_key = f"{int(dpid2)}-{int(dpid1)}"
+                link_key = f"{int(dpid2, base=16)}-{int(dpid1, base=16)}"
                 current_link_bandwidths[link_key] = val
                 info(f"*** Initialized link {link_key} with bandwidth {current_link_bandwidths[link_key]} Mbps\n")
 
-        for _ in range(3):
-            simulate_real_links(net, links, SAT_BANDWIDTH, ETH_BANDWIDTH, current_link_bandwidths)
-            # random_ping_test(net)
-            run_experiment(net)
+        with open('link_bandwidths.json', 'w') as f:
+            json.dump(current_link_bandwidths, f)
 
-        time.sleep(5)
+        sleep(5)
+        CLI(net)
+        
+        start_n_flows(net, 25)
+
+        # CLI(net)
+
+        fluctuation_time = 5
+        client_time = 50
+
+        for _ in range(client_time // fluctuation_time):
+            # simulate_real_links(net, links, SAT_BANDWIDTH, ETH_BANDWIDTH, current_link_bandwidths)
+            # random_ping_test(net)
+            # run_experiment(net)
+            sleep(fluctuation_time)
+
+
+
+        time.sleep(200)
+
 
     except KeyboardInterrupt:
         # Handle keyboard interrupt gracefully

@@ -4,6 +4,7 @@ import argparse
 import time
 
 def main():
+    threads = []
     parser = argparse.ArgumentParser(description='Run experiment server')
     parser.add_argument('ip', help='IP address to open server on')
     parser.add_argument('port', type=int, help='Port number')
@@ -24,6 +25,10 @@ def main():
         # Handle the connection in a new thread
         client_thread = threading.Thread(target=handle_client, args=(client_socket, client_address, args.ip))
         client_thread.start()
+        threads.append(client_thread)
+    
+    
+    
 
 
 def handle_client(client_socket, client_address, server_ip):

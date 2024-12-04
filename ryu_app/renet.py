@@ -47,7 +47,6 @@ class RENETController(app_manager.RyuApp):
         """
         Install default flows for LLDP packet handling.
         """
-        # print("Installing default flows")
         parser = datapath.ofproto_parser
         ofproto = datapath.ofproto
 
@@ -68,29 +67,12 @@ class RENETController(app_manager.RyuApp):
         """
         Update topology when a new switch enters.
         """
-        # print(ev.__dict__)
         datapath = ev.switch.dp
         # keep track of datapath
-        # print(ev.switch.dp)
         # self.datapaths[ev.switch.dp.id] = ev.switch.dp
         hub.spawn(self._send_stats_request, datapath)
         self.update_topology()
 
-    # @set_ev_cls(ofp_event.EventOFPSwitchFeatures, MAIN_DISPATCHER)
-    # def _switch_features_handler(self, ev):
-    #     """Handles the switch feature reply."""
-    #     datapath = ev.msg.datapath
-    #     self.datapaths[datapath.id] = datapath
-
-    #     # Send a default flow mod to prevent packet flooding by default
-    #     ofproto = datapath.ofproto
-    #     parser = datapath.ofproto_parser
-    #     match = parser.OFPMatch()
-    #     actions = []
-    #     # self.add_flow(datapath, 0, match, actions)  # Drop all by default
-    #     print(f"Switch {datapath.id} connected.")
-
-    #     hub.spawn(self._send_stats_request, datapath)
 
     @set_ev_cls(event.EventLinkAdd)
     def link_add_handler(self, ev):
@@ -135,18 +117,6 @@ class RENETController(app_manager.RyuApp):
             self.datapaths[dpid] = switch.dp
             self.network_graph.add_node(dpid, type='switch')
 
-        # Add links as edges
-        links = get_link(self, None)
-        for link in links:
-            src = link.src.dpid
-            dst = link.dst.dpid
-            src_port = link.src.port_no
-            dst_port = link.dst.port_no
-
-            # Add bidirectional edges with the correct attributes
-            self.network_graph.add_edge(src, dst, src_port=src_port, dst_port=dst_port)
-            self.network_graph.add_edge(dst, src, src_port=dst_port, dst_port=src_port)
-
         # Add hosts as nodes (from MAC mapping)
         for mac, switch_info in self.mac_to_switch.items():
             switch_dpid = switch_info['dpid']
@@ -154,6 +124,26 @@ class RENETController(app_manager.RyuApp):
             self.network_graph.add_node(mac, type='host')
             self.network_graph.add_edge(mac, switch_dpid, dst_port=port_no)
             self.network_graph.add_edge(switch_dpid, mac, src_port=port_no)
+
+        # Add links as edges
+        links = get_link(self, None)
+        print(links)
+        for link in links:
+            src = link.src.dpid
+            dst = link.dst.dpid
+            src_port = link.src.port_no
+            dst_port = link.dst.port_no
+            if src not in self.network_graph.nodes:
+                self.logger.warning(f"Switch {src} not found in network graph.")
+                continue
+            if dst not in self.network_graph.nodes:
+                self.logger.warning(f"Switch {dst} not found in network graph.")
+                continue
+            # Add bidirectional edges with the correct attributes
+            self.network_graph.add_edge(src, dst, src_port=src_port, dst_port=dst_port)
+            self.network_graph.add_edge(dst, src, src_port=dst_port, dst_port=src_port)
+
+
 
         # self.logger.info("\nUpdated network topology:\nNodes: %s\nEdges: %s\n", self.network_graph.nodes(data=True), self.network_graph.edges(data=False))
 
@@ -236,14 +226,11 @@ class RENETController(app_manager.RyuApp):
                         flow_info['active'] = False
                         rerun = True
 
-                        # self.logger.info("Flow %s marked as inactive", flow_key)
+                        self.logger.info("Flow %s marked as inactive", flow_key)
             
             if rerun:
-                # print("Rerouting flows")
                 to_rerun = {}
                 for flow_key, flow_info in self.flow_store.items():
-                    # print('Rerouting info:', flow_info['current_rate'], DESIRED_RATE)
-                    # print(f"Flow info: active={flow_info['active']}, current_rate={flow_info['current_rate']}, recent_rerouting_countdown={flow_info['recent_rerouting_countdown']}")
                     if flow_info['active'] and flow_info['recent_rerouting_countdown'] == 0 and flow_info['current_rate'] < 0.75 * DESIRED_RATE:
                         to_rerun[flow_key] = flow_info['current_rate'] / DESIRED_RATE
                 
@@ -253,7 +240,6 @@ class RENETController(app_manager.RyuApp):
                     if flow_key[0] not in self.network_graph or flow_key[1] not in self.network_graph:
                         continue
                     path, throughput = self.path_selection(flow_key[0], flow_key[1])
-                    # print('throughput:', throughput, "current rate:", self.flow_store[flow_key]['current_rate'])
                     if throughput > self.flow_store[flow_key]['current_rate'] * 1.25:
                         self.flow_store[flow_key]['recent_rerouting_countdown'] = 2
                         # decrement the flow count for the old path
@@ -270,10 +256,10 @@ class RENETController(app_manager.RyuApp):
 
                         src, dst, src_port, dst_port = flow_key
 
-                        # print(f"Rerouting flow from {src} to {dst}: {path}")
-
                         self.install_path_flows(path, src, dst, src_port, dst_port)
-                        self.install_path_flows(path[::-1], dst, src, src_port, dst_port)
+                        # self.install_path_flows(path[::-1], dst, src, src_port, dst_port)
+
+                        print(f"Rerouting flow from {src} to {dst}: {path} (Flow Left)")
 
 
 
@@ -292,11 +278,10 @@ class RENETController(app_manager.RyuApp):
 
         for stat in body:
             # Flow store stores source, destination, current path, rate, and other metrics
-            # print("Stat match", stat.match)
-            # print("addresses:", mac.haddr_to_str(stat.match.dl_src), mac.haddr_to_str(stat.match.dl_dst))
             flow_key = (mac.haddr_to_str(stat.match.dl_src), mac.haddr_to_str(stat.match.dl_dst), stat.match.tp_src, stat.match.tp_dst)
+            # print the whol match
+            # print("Match:", stat.match)
             prev_flow_info = self.flow_store.get(flow_key, {})
-            print("flow_key", flow_key)
             if prev_flow_info == {}:
                 prev_flow_info['path'] = []
             
@@ -326,11 +311,9 @@ class RENETController(app_manager.RyuApp):
             # Find the connected switch for the given port
             dpid1 = datapath.id
             port_no = stat.port_no
-            # print(f'port number {port_no}')
             dpid2 = None
             for neighbor in self.network_graph.neighbors(dpid1):
                 edge_data = self.network_graph.get_edge_data(dpid1, neighbor)
-                # print (f'edge data {edge_data}')
                 if 'src_port' in edge_data and edge_data['src_port'] == port_no:
                     dpid2 = neighbor
                     break
@@ -345,7 +328,6 @@ class RENETController(app_manager.RyuApp):
             # Link store stores source, destination, current rate, and other metrics
             link_key = f"{dpid1}-{dpid2}"
             prev_link_info = self.link_store.get(link_key, {}).copy()
-            print("prev_lin_info", prev_link_info)
 
             if prev_link_info == {}:
                 prev_link_info['recieved_bytes'] = 0
@@ -362,24 +344,16 @@ class RENETController(app_manager.RyuApp):
                 'active': True,  # Assuming link is active if stats exist
             }
 
-            # print(new_link_info)
-            # print(f"Received bytes on port {port_no} of switch {dpid1}: {stat.rx_bytes}")
-
             with open('/mn_scripts/link_bandwidths.json', 'r') as f:
                 current_link_bandwidths = json.load(f)
                 link_key = f"{dpid1}-{dpid2}"
                 link_key2 = f"{dpid2}-{dpid1}"
                 new_link_info['current_bandwidth'] = current_link_bandwidths.get(link_key, 0)
-                print("new_link_info", new_link_info)
-                print(f"Link bandwidth: {new_link_info['current_bandwidth']}, previous bandwidth: {prev_bandwidth}")
                 if new_link_info['current_bandwidth'] < prev_bandwidth:
-                    print(f"Entering thingggggg")
                     # iterate though the flow store and get the ones that are using this link
                     for flow_key, flow_info in self.flow_store.items():
                         if self.edge_in_path(flow_info['path'], dpid1, dpid2):
-                            print(f"Rerouting flow {flow_key}")
                             path, throughput = self.path_selection(flow_key[0], flow_key[1])
-                            print('throughput:', throughput, "current rate:", flow_info['current_rate'])
 
                             self.flow_store[flow_key]['recent_rerouting_countdown'] = 2
                             # decrement the flow count for the old path
@@ -396,10 +370,10 @@ class RENETController(app_manager.RyuApp):
 
                             src, dst, src_port, dst_port = flow_key
 
-                            print(f"Rerouting flow from {src} to {dst}: {path}")
+                            print(f"Rerouting flow from {src} to {dst}: {path} (Link Bandwidthd Decreased)")
 
                             self.install_path_flows(path, src, dst, src_port, dst_port)
-                            self.install_path_flows(path[::-1], dst, src, src_port, dst_port)
+                            # self.install_path_flows(path[::-1], dst, src, src_port, dst_port)
                             # self.logger.info("Rerouted flow %s to path %s", flow_key, path)
                             break
 
@@ -433,14 +407,18 @@ class RENETController(app_manager.RyuApp):
         dst = eth.dst
         dpid = datapath.id
 
+        print("Packet in: ", src, "->", dst, "on switch", dpid, "port", in_port)
+
 
 
         # Ignore LLDP packets
         if eth.ethertype == 0x88cc:# or eth.ethertype == 0x86DD:
-            # print("Ignoring LLDP packet")
             return
 
-        print(f"Packet in: {src} -> {dst} on switch {dpid} port {in_port} of type {eth.ethertype}")
+        # don't show packets with type 34525
+
+        if eth.ethertype != 34525:
+            print(f"Packet in: {src} -> {dst} on switch {dpid} port {in_port} of type {eth.ethertype}")
         
 
         # Learn the source host's switch and port
@@ -483,11 +461,13 @@ class RENETController(app_manager.RyuApp):
                 self.flood_packet_mst(datapath, in_port, msg)
                 return
             
+            print("Src-port", src_port, "Dst-port", dst_port)
+            
             path = self.path_selection(src, dst)[0]
 
             self.logger.info(f"Path computed from {src} to {dst}: {path}")
             self.install_path_flows(path, src, dst, src_port, dst_port)
-            self.install_path_flows(path[::-1], dst, src, src_port, dst_port)
+            # self.install_path_flows(path[::-1], dst, src, src_port, dst_port)
             for i in range(len(path) - 2):
                 self.flows_per_link[f'{path[i]}-{path[i + 1]}'] += 1
                 self.flows_per_link[f'{path[i + 1]}-{path[i]}'] += 1
@@ -509,7 +489,7 @@ class RENETController(app_manager.RyuApp):
         Compute the optimal path between two switches, considering link capacities and flow requirements.
         """
         # Get K shortest paths
-        K = 5  # Number of shortest paths to consider
+        K = 10  # Number of shortest paths to consider
         paths = list(nx.shortest_simple_paths(self.network_graph, source=src, target=dst))
         paths = paths[:K]  # Limit to K shortest paths
 
@@ -561,15 +541,8 @@ class RENETController(app_manager.RyuApp):
         dpid = datapath.id
         ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
-        # for neighbor in self.mst.neighbors(dpid):
-        #     edge_data = self.network_graph.get_edge_data(dpid, neighbor)
-        #     if edge_data['src_port'] != in_port:
-        #         # print(f"Flooding packet from {dpid} to {neighbor}")
-        #         out_port = edge_data['src_port']
-        #         actions = [datapath.ofproto_parser.OFPActionOutput(out_port)]
-        #         self.send_packet(datapath, msg.buffer_id, in_port, actions, msg.data)
 
-        # just flood to all neighbors
+        # just flood to all neighbors handled with port flood blocking
         actions = [datapath.ofproto_parser.OFPActionOutput(ofproto.OFPP_FLOOD)]
         self.send_packet(datapath, msg.buffer_id, in_port, actions, msg.data)
 
@@ -622,7 +595,9 @@ class RENETController(app_manager.RyuApp):
         parser = datapath.ofproto_parser
         ofproto = datapath.ofproto
 
-        match = parser.OFPMatch(dl_src=src, dl_dst=dst, tp_src=tp_src, tp_dst=tp_dst)
+        print("tps:", tp_src, tp_dst)
+
+        match = parser.OFPMatch(dl_src=src, dl_dst=dst, nw_proto=6, tp_src=tp_src, tp_dst=tp_dst)
         actions = [parser.OFPActionOutput(out_port)]
         mod = parser.OFPFlowMod(
             datapath=datapath,
