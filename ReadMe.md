@@ -1,8 +1,5 @@
-# Project Title
+# Reproducing RENET
 
-Description
-
-## Table of Contents
 
 ## Installation
 
